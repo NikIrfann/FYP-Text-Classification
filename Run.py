@@ -15,6 +15,7 @@ from wordcloud import WordCloud
 nltk.download('stopwords')
 nltk.download('punkt')
 
+theme = gr.themes.Soft()
 nlp = spacy.load("en_core_web_sm")
 
 print("CURRENT WORKING DIRECTORY:", os.path.dirname(os.path.abspath(__file__)))
@@ -107,7 +108,8 @@ with gr.Blocks() as single_query:
 demo = gr.Interface(
     fn=predict, 
     inputs=inp, 
-    outputs=[out, graph, gr.Image(type="pil", label="Word Cloud") ], 
+    outputs=[out, graph, gr.Image(type="pil", label="Word Cloud") ],
+    theme=theme, 
     allow_flagging="never")
 
 
@@ -156,6 +158,6 @@ with gr.Blocks() as third_page_layout:
     run_button.click(predict_mult, inputs=file_inp, outputs=[file_out, out_text])
     download_button.click(download_df, inputs=file_out)
 
-page = gr.TabbedInterface([demo, bar, third_page_layout], ["Text Classification Demo", "Full Data Plot", "Input File Classification"])
+page = gr.TabbedInterface([demo, bar, third_page_layout], ["Text Classification Demo", "Full Data Plot", "Input File Classification"], theme=theme)
 
 page.launch()
