@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+from wordcloud import WordCloud
 nltk.download('stopwords')
 nltk.download('punkt')
 
@@ -50,7 +51,28 @@ def predict(query):
     counts=Counter(final_words)
     
     df = pd.DataFrame(counts.most_common(10), columns=['Words', 'Counts'])
-    return preds, gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words")
+    # Include the Word Cloud image in the output
+    wordcloud_img_path = visualize_data(cleaned_text)
+    return preds, gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words"),wordcloud_img_path
+
+def visualize_data(Details):
+    img_dir = os.path.expanduser('~/visualization_images')
+    os.makedirs(img_dir, exist_ok=True)
+
+    # Plot word cloud for most frequent words
+    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(Details)
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.title('Word Cloud for Most Frequent Words')
+    plt.savefig(os.path.join(img_dir, 'word_cloud.png'))
+
+    # Save the generated images to the directory
+    word_cloud_img_path = os.path.join(img_dir, 'word_cloud.png')
+
+    return word_cloud_img_path
+    
+
 
 
 def predict_mult(df:pd.DataFrame):
@@ -69,19 +91,24 @@ loaded_vectorizer = joblib.load(os.path.join(root_path, 'tfidf_vectorizer.pkl'))
 naive_bayes_classifier = joblib.load(os.path.join(root_path, 'model.h5'))
 
 
-with gr.Blocks() as second_page_layout:
-    gr.Markdown("Start typing below and then click **Run** to see the output.")
+with gr.Blocks() as single_query:
+    gr.Markdown("Start typing below and then click **Run** to see the 1.")
     with gr.Row():
         with gr.Column():
-            inp = gr.Textbox()
-            # btn = gr.Button("Run")
+            inp = gr.Textbox(label='Input Query')
+            #btn = gr.Button("Run")
         with gr.Column():
-            out = gr.Textbox()
-            graph = gr.BarPlot(render=False)
+            out = gr.Textbox(label='Prediction')
+            graph = gr.ScatterPlot(render=False, label='Scatter Plot')
     
     # btn.click(fn=predict, inputs=inp, outputs=[out, graph])
 
-demo = gr.Interface(fn=predict, inputs=inp, outputs=[out, graph], allow_flagging="never")
+# 1st tab 
+demo = gr.Interface(
+    fn=predict, 
+    inputs=inp, 
+    outputs=[out, graph, gr.Image(type="pil", label="Word Cloud") ], 
+    allow_flagging="never")
 
 
 def construct_full_data_ranked_locations():
@@ -94,9 +121,12 @@ def construct_full_data_ranked_locations():
         "y": "Frequency",
         "vertical": False,
         "title": "Ranked Entity Locations",
-        "width":1000,
+        "width":1200,
+        "height":640
     }
 
+# 2nd Tab
+#
 bar = gr.BarPlot(**construct_full_data_ranked_locations())
 
 
