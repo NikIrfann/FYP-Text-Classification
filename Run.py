@@ -137,7 +137,7 @@ bar = gr.BarPlot(**construct_full_data_ranked_locations())
 #     return file
 
 def download_df(file:pd.DataFrame):
-    download_path = os.path.join(root_path, "predicted.csv")
+    download_path = os.path.join("predicted.csv")
     file.to_csv(download_path)
     print(f"Predictions Downloaded to: {download_path}")
 
