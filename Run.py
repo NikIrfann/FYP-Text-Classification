@@ -117,19 +117,43 @@ def construct_full_data_ranked_locations():
     with open(os.path.join(root_path, "ranked_locations.pkl"), "rb") as f:
         ranked_locations = pickle.load(f)
 
-    return {
-        "value": pd.DataFrame(ranked_locations, columns=["Entity Location", "Frequency"]),
-        "x": "Entity Location",
-        "y": "Frequency",
-        "vertical": False,
-        "title": "Ranked Entity Locations",
-        "width":1200,
-        "height":640
-    }
+    df = pd.DataFrame(ranked_locations, columns=["Entity Location", "Frequency"])
+    return df
 
-# 2nd Tab
-#
-bar = gr.BarPlot(**construct_full_data_ranked_locations())
+def custom_bar_plot(df):
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    locations = df["Entity Location"]
+    frequencies = df["Frequency"]
+
+    bars = ax.bar(locations, frequencies, color='green')
+
+    # Add text labels on the right side of each bar
+    for bar, frequency in zip(bars, frequencies):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width(), height, str(frequency), ha='left', va='center')
+
+    ax.set_title('Ranked Entity Locations')
+    ax.set_xlabel('Entity Location')
+    ax.set_ylabel('Frequency')
+
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+
+    # Save the figure to a temporary file
+    plt.savefig("bar_plot.png")
+
+# Create the DataFrame and custom bar plot
+df_ranked_locations = construct_full_data_ranked_locations()
+custom_bar_plot(df_ranked_locations)
+
+# Display the Gradio Interface
+iface = gr.Interface(
+    fn=None,  # Replace with your actual function
+    inputs=None,  # Replace with your actual input components
+    outputs=[gr.Image("bar_plot.png", label="Custom Bar Plot")],  # Use the Gr.Image component for outputS
+    allow_flagging="never"    
+)
 
 
 
@@ -158,6 +182,6 @@ with gr.Blocks() as third_page_layout:
     run_button.click(predict_mult, inputs=file_inp, outputs=[file_out, out_text])
     download_button.click(download_df, inputs=file_out)
 
-page = gr.TabbedInterface([demo, bar, third_page_layout], ["Text Classification Demo", "Full Data Plot", "Input File Classification"], theme=theme)
+page = gr.TabbedInterface([demo, iface, third_page_layout], ["Text Classification Demo", "Full Data Plot", "Input File Classification"], theme=theme)
 
 page.launch()
