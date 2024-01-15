@@ -1,66 +1,109 @@
 import gradio as gr
 import joblib
-from IPython import embed
 import pickle
 import pandas as pd
 import os
 import sklearn
 from collections import Counter
+from sklearn.metrics import accuracy_score
 import spacy
+import matplotlib
+matplotlib.use("agg")  # Add this line to set the backend to 'agg'
 import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from wordcloud import WordCloud
+
+# Download NLTK resources
 nltk.download('stopwords')
 nltk.download('punkt')
 
-theme = gr.themes.Soft()
+# Load spaCy model
 nlp = spacy.load("en_core_web_sm")
+
+# Define the theme for Gradio
+theme = gr.themes.Soft()
 
 print("CURRENT WORKING DIRECTORY:", os.path.dirname(os.path.abspath(__file__)))
 print("FILES IN THIS DIRECTORY:", os.listdir())
 
+
 # Function for cleaning text data
 def clean_text(text):
-    # Tokenize the text
     tokens = word_tokenize(text.lower())
-
-    # Remove stop words
     stop_words = set(stopwords.words('english'))
     tokens = [word for word in tokens if word.isalnum() and word not in stop_words]
-
-    # Causing lots of word missing alphabet
-    # Stemming (optional)
-    # porter = PorterStemmer()
-    # tokens = [porter.stem(word) for word in tokens]
-
-    # Join the tokens back into a string
     cleaned_text = ' '.join(tokens)
     return cleaned_text
 
-def class_det(Details, vectorizer, classifier):
+# Function to make text classification predictions
+def class_det(Details, vectorizer, classifier, return_proba=False):
     input_data = [Details]
     vectorized_input_data = vectorizer.transform(input_data)
-    predictions = classifier.predict(vectorized_input_data)
-    return predictions
-
-def predict(query):
-    preds = class_det(query, loaded_vectorizer, naive_bayes_classifier)
-    cleaned_text = clean_text(query)
-    final_words = word_tokenize(cleaned_text)
-    counts=Counter(final_words)
     
-    df = pd.DataFrame(counts.most_common(10), columns=['Words', 'Counts'])
-    # Include the Word Cloud image in the output
-    wordcloud_img_path = visualize_data(cleaned_text)
-    return preds, gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words"),wordcloud_img_path
+    if return_proba:
+        predictions_proba = classifier.predict_proba(vectorized_input_data)
+        return predictions_proba
+    else:
+        predictions = classifier.predict(vectorized_input_data)
+        return predictions
 
+
+# Function to calculate class probability and confidence
+def class_prob_conf(query):
+    predictions_proba = class_det(query, loaded_vectorizer, naive_bayes_classifier, return_proba=True)
+    top_class_idx = predictions_proba.argmax()
+    top_class_prob = predictions_proba.max()
+    top_class = naive_bayes_classifier.classes_[top_class_idx]
+    return top_class, top_class_prob
+
+
+
+# Function to predict and display results for a single query
+def predict(query):
+    try:
+        print("Inside predict function")
+        top_class, top_class_prob = class_prob_conf(query)
+        print("Predicted Class:", top_class)
+
+        cleaned_text = clean_text(query)
+        print("Cleaned Text:", cleaned_text)
+
+        final_words = word_tokenize(cleaned_text)
+        counts = Counter(final_words)
+
+        df = pd.DataFrame(counts.most_common(10), columns=['Words', 'Counts'])
+        print("Top 10 Words:", df)
+
+        wordcloud_img_path = visualize_data(cleaned_text)
+        print("Word Cloud Path:", wordcloud_img_path)
+
+        bar_plot = gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words")
+
+        # Display the top predicted class and its confidence score
+        result_text_class = f"{top_class}"
+        result_top_class = f"{top_class_prob:.2%}"
+        print("Result Text:", result_text_class)
+        print("Probability:",result_top_class)
+
+        return (
+            top_class, 
+            top_class_prob,
+            bar_plot,
+            gr.Image(wordcloud_img_path, label="Word Cloud")
+        )
+
+    except Exception as e:
+        print("Error in predict function:", e)
+        raise e
+
+
+ #Function to visualize data and save word cloud image
 def visualize_data(Details):
     img_dir = os.path.expanduser('~/visualization_images')
     os.makedirs(img_dir, exist_ok=True)
 
-    # Plot word cloud for most frequent words
     wordcloud = WordCloud(width=800, height=400, background_color='white').generate(Details)
     plt.figure(figsize=(10, 5))
     plt.imshow(wordcloud, interpolation='bilinear')
@@ -68,51 +111,57 @@ def visualize_data(Details):
     plt.title('Word Cloud for Most Frequent Words')
     plt.savefig(os.path.join(img_dir, 'word_cloud.png'))
 
-    # Save the generated images to the directory
     word_cloud_img_path = os.path.join(img_dir, 'word_cloud.png')
-
     return word_cloud_img_path
     
 
+# Function to calculate accuracy
+def calculate_accuracy(predictions, actual_labels):
+    accuracy = accuracy_score(actual_labels, predictions)
+    return accuracy
 
-
-def predict_mult(df:pd.DataFrame):
-    # embed()
-    # raise Exception
+# Function to make predictions for multiple queries
+def predict_mult(df: pd.DataFrame):
     vectorized_input_data = loaded_vectorizer.transform(df['Details'])
     predictions = naive_bayes_classifier.predict(vectorized_input_data)
     new_df = df.copy()
     new_df['Predictions'] = predictions.tolist()
-    return new_df, predictions.tolist()
 
+    # Assuming you have a column named 'Actual_Labels' in your DataFrame
+    actual_labels = df['Class']  # Change 'Actual_Labels' to the actual column name
+    accuracy = calculate_accuracy(predictions, actual_labels)
+    return new_df, predictions.tolist(), accuracy
+
+
+# Load the saved TF-IDF vectorizer and Naive Bayes classifier
 root_path = "Data Cleaning"
-# Load the saved TF-IDF vectorizer
 loaded_vectorizer = joblib.load(os.path.join(root_path, 'tfidf_vectorizer.pkl'))
-# Load the saved Naive Bayes classifier
 naive_bayes_classifier = joblib.load(os.path.join(root_path, 'model.h5'))
 
 
+# Gradio interface for a single query
 with gr.Blocks() as single_query:
     gr.Markdown("Start typing below and then click **Run** to see the 1.")
     with gr.Row():
         with gr.Column():
             inp = gr.Textbox(label='Input Query')
-            #btn = gr.Button("Run")
+            #run_button_single = gr.Button("Run")
         with gr.Column():
-            out = gr.Textbox(label='Prediction')
-            graph = gr.ScatterPlot(render=False, label='Scatter Plot')
-    
-    # btn.click(fn=predict, inputs=inp, outputs=[out, graph])
+            predictclass = gr.Textbox(label='Text Class')
+            top_class_prob = gr.Textbox(label='Probability')
+            graph = gr.ScatterPlot(render=False, label='Scatter Plot')   
 
-# 1st tab 
+# Gradio interface for the first tab
 demo = gr.Interface(
     fn=predict, 
     inputs=inp, 
-    outputs=[out, graph, gr.Image(type="pil", label="Word Cloud") ],
-    theme=theme, 
+    outputs=[predictclass, top_class_prob, graph, gr.Image(type="pil", label="Word Cloud")],
+    theme=theme,
+    live=True,
     allow_flagging="never")
 
 
+# Function to construct full data of ranked locations
 def construct_full_data_ranked_locations():
     with open(os.path.join(root_path, "ranked_locations.pkl"), "rb") as f:
         ranked_locations = pickle.load(f)
@@ -120,15 +169,14 @@ def construct_full_data_ranked_locations():
     df = pd.DataFrame(ranked_locations, columns=["Entity Location", "Frequency"])
     return df
 
+# Function to create a custom bar plot
 def custom_bar_plot(df):
     fig, ax = plt.subplots(figsize=(12, 6))
-
     locations = df["Entity Location"]
     frequencies = df["Frequency"]
 
     bars = ax.bar(locations, frequencies, color='green')
 
-    # Add text labels on the right side of each bar
     for bar, frequency in zip(bars, frequencies):
         height = bar.get_height()
         ax.text(bar.get_x() + bar.get_width(), height, str(frequency), ha='left', va='center')
@@ -139,33 +187,29 @@ def custom_bar_plot(df):
 
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-
-    # Save the figure to a temporary file
     plt.savefig("bar_plot.png")
 
 # Create the DataFrame and custom bar plot
 df_ranked_locations = construct_full_data_ranked_locations()
 custom_bar_plot(df_ranked_locations)
 
-# Display the Gradio Interface
+# Gradio interface for the second tab
 iface = gr.Interface(
-    fn=None,  # Replace with your actual function
-    inputs=None,  # Replace with your actual input components
-    outputs=[gr.Image("bar_plot.png", label="Custom Bar Plot")],  # Use the Gr.Image component for outputS
-    allow_flagging="never"    
+    fn=None,  
+    inputs=None, 
+    outputs=[gr.Image("bar_plot.png", label="")],
+    allow_flagging="never",
+    live=True
 )
 
-
-
-# def upload_file(file):
-#     return file
-
-def download_df(file:pd.DataFrame):
+# Function to download predictions to a CSV file
+def download_df(file: pd.DataFrame):
     download_path = os.path.join("predicted.csv")
     file.to_csv(download_path)
     print(f"Predictions Downloaded to: {download_path}")
 
-with gr.Blocks() as third_page_layout:
+# Gradio interface for the third tab
+with gr.Blocks() as input_file:
     gr.Markdown("Upload a CSV with a column of queries titled 'Details'. Click Run to see and download predictions.")
     with gr.Row():
         with gr.Column():
@@ -173,15 +217,24 @@ with gr.Blocks() as third_page_layout:
             with gr.Row():
                 upload_button = gr.UploadButton("Click to Upload a File", file_types=["file"])
                 run_button = gr.Button("Run")
-        with gr.Column():
-            file_out = gr.DataFrame(visible=False)
-            out_text = gr.Textbox()
-            download_button = gr.Button("Download")
-    
+            with gr.Row():
+                gr.Markdown("Predictions along with original data")
+            with gr.Row():
+                file_out = gr.DataFrame()
+            with gr.Row():
+                out_text = gr.Textbox()  
+            with gr.Row():
+                download_button = gr.Button("Download")
+            with gr.Row():
+                accuracy_text = gr.Textbox(label='Accuracy')
+
     upload_button.upload(lambda file_path: file_path, inputs=upload_button, outputs=file_inp)
-    run_button.click(predict_mult, inputs=file_inp, outputs=[file_out, out_text])
+    run_button.click(predict_mult, inputs=file_inp, outputs=[file_out, out_text, accuracy_text])
     download_button.click(download_df, inputs=file_out)
 
-page = gr.TabbedInterface([demo, iface, third_page_layout], ["Text Classification Demo", "Full Data Plot", "Input File Classification"], theme=theme)
+# Create a Gradio Tabbed Interface
+page = gr.TabbedInterface([demo, input_file, iface], ["Text Classification Demo", "Input File Classification", "Location Data Plot"], 
+                          theme=theme)
 
+# Launch the Gradio interface
 page.launch()
