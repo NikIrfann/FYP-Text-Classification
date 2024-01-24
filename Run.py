@@ -61,37 +61,36 @@ def class_prob_conf(query):
 
 
 # Function to predict and display results for a single query
-def predict(query):
+def predict(query, loaded_vectorizer, naive_bayes_classifier):
     try:
-        print("Inside predict function")
+        word_count = len(query.split())
+
         top_class, top_class_prob = class_prob_conf(query)
-        print("Predicted Class:", top_class)
+
 
         cleaned_text = clean_text(query)
-        print("Cleaned Text:", cleaned_text)
+
 
         final_words = word_tokenize(cleaned_text)
         counts = Counter(final_words)
 
         df = pd.DataFrame(counts.most_common(10), columns=['Words', 'Counts'])
-        print("Top 10 Words:", df)
-
-        wordcloud_img_path = visualize_data(cleaned_text)
-        print("Word Cloud Path:", wordcloud_img_path)
-
-        bar_plot = gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words")
+        bar_plot = gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words")       
 
         # Display the top predicted class and its confidence score
         result_text_class = f"{top_class}"
         result_top_class = f"{top_class_prob:.2%}"
-        print("Result Text:", result_text_class)
-        print("Probability:",result_top_class)
+
+        wordcloud_img_path = visualize_data(cleaned_text)
+
+        word_cloud = gr.Image(wordcloud_img_path, label="Word Cloud")
 
         return (
-            top_class, 
-            top_class_prob,
+            word_count,
+            result_text_class, 
+            result_top_class,
             bar_plot,
-            gr.Image(wordcloud_img_path, label="Word Cloud")
+            word_cloud
         )
 
     except Exception as e:
@@ -134,36 +133,40 @@ def predict_mult(df: pd.DataFrame):
 
 
 # Load the saved TF-IDF vectorizer and Naive Bayes classifier
-root_path = "Data Cleaning"
-loaded_vectorizer = joblib.load(os.path.join(root_path, 'tfidf_vectorizer.pkl'))
-naive_bayes_classifier = joblib.load(os.path.join(root_path, 'model.h5'))
+root_path = "FYP - TEXT CLASSIFICATION"
+loaded_vectorizer = joblib.load(os.path.join(root_path, '../Modelling/tfidf_vectorizer.pkl'))
+naive_bayes_classifier = joblib.load(os.path.join(root_path, '../Modelling/model.h5'))
 
 
 # Gradio interface for a single query
 with gr.Blocks() as single_query:
-    gr.Markdown("Start typing below and then click **Run** to see the 1.")
+    with gr.Row():
+        with gr.Column(scale=9):
+            inp = gr.Textbox(label='Input Query')
+        with gr.Column(scale=1):
+            with gr.Row():
+                run_btn = gr.Button("Run", size="lg")
     with gr.Row():
         with gr.Column():
-            inp = gr.Textbox(label='Input Query')
-            #run_button_single = gr.Button("Run")
+            word_count = gr.Textbox(label="Word Count")
         with gr.Column():
             predictclass = gr.Textbox(label='Text Class')
-            top_class_prob = gr.Textbox(label='Probability')
-            graph = gr.ScatterPlot(render=False, label='Scatter Plot')   
+        with gr.Column():
+            result_prob = gr.Textbox(label='Probability')
+    with gr.Row():
+        similar_words = gr.Textbox(label="Similar words to the class")
+    with gr.Row():
+        with gr.Column():
+            graph = gr.ScatterPlot(label='Scatter Plot')
+        with gr.Column():
+            word_cloud = gr.Image(type="pil", label="Word Cloud")
 
-# Gradio interface for the first tab
-demo = gr.Interface(
-    fn=predict, 
-    inputs=inp, 
-    outputs=[predictclass, top_class_prob, graph, gr.Image(type="pil", label="Word Cloud")],
-    theme=theme,
-    live=True,
-    allow_flagging="never")
+    run_btn.click(lambda query: predict(query, loaded_vectorizer, naive_bayes_classifier), inputs=inp, outputs=[word_count,predictclass,result_prob,graph,word_cloud])
 
 
 # Function to construct full data of ranked locations
 def construct_full_data_ranked_locations():
-    with open(os.path.join(root_path, "ranked_locations.pkl"), "rb") as f:
+    with open(os.path.join(root_path, "../Data Cleaning/ranked_locations.pkl"), "rb") as f:
         ranked_locations = pickle.load(f)
 
     df = pd.DataFrame(ranked_locations, columns=["Entity Location", "Frequency"])
@@ -193,14 +196,9 @@ def custom_bar_plot(df):
 df_ranked_locations = construct_full_data_ranked_locations()
 custom_bar_plot(df_ranked_locations)
 
-# Gradio interface for the second tab
-iface = gr.Interface(
-    fn=None,  
-    inputs=None, 
-    outputs=[gr.Image("bar_plot.png", label="")],
-    allow_flagging="never",
-    live=True
-)
+with gr.Blocks()as iface:
+    gr.Image("bar_plot.png", label="")
+
 
 # Function to download predictions to a CSV file
 def download_df(file: pd.DataFrame):
@@ -208,7 +206,7 @@ def download_df(file: pd.DataFrame):
     file.to_csv(download_path)
     print(f"Predictions Downloaded to: {download_path}")
 
-# Gradio interface for the third tab
+# Gradio interface for the 2nd tab
 with gr.Blocks() as input_file:
     gr.Markdown("Upload a CSV with a column of queries titled 'Details'. Click Run to see and download predictions.")
     with gr.Row():
@@ -217,8 +215,6 @@ with gr.Blocks() as input_file:
             with gr.Row():
                 upload_button = gr.UploadButton("Click to Upload a File", file_types=["file"])
                 run_button = gr.Button("Run")
-            with gr.Row():
-                gr.Markdown("Predictions along with original data")
             with gr.Row():
                 file_out = gr.DataFrame()
             with gr.Row():
@@ -232,8 +228,15 @@ with gr.Blocks() as input_file:
     run_button.click(predict_mult, inputs=file_inp, outputs=[file_out, out_text, accuracy_text])
     download_button.click(download_df, inputs=file_out)
 
+
+demo_tabbed = gr.TabbedInterface(
+    [single_query, input_file],
+    ["Query", "File"],
+    title="Text Classification"
+)
+
 # Create a Gradio Tabbed Interface
-page = gr.TabbedInterface([demo, input_file, iface], ["Text Classification Demo", "Input File Classification", "Location Data Plot"], 
+page = gr.TabbedInterface([iface,demo_tabbed], ["Data Analysis","Classification Demo"], 
                           theme=theme)
 
 # Launch the Gradio interface
