@@ -15,7 +15,8 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from wordcloud import WordCloud
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.metrics.pairwise import cosine_similarity
+
 from PIL import Image
 
 # Download NLTK resources
@@ -26,17 +27,18 @@ nltk.download('punkt')
 nlp = spacy.load("en_core_web_sm")
 
 
-
 # Load the saved TF-IDF vectorizer and Naive Bayes classifier
 root_path = "FYP - TEXT CLASSIFICATION"
 loaded_vectorizer = joblib.load(os.path.join(root_path, '../Modelling/tfidf_vectorizer.pkl'))
 naive_bayes_classifier = joblib.load(os.path.join(root_path, '../Modelling/model.h5'))
 
+csvFile =os.path.join(root_path,"../Data Cleaning/data1.4.csv")
+df = pd.read_csv(csvFile)
+
 # Function for cleaning text data
 def clean_text(text):
-    tokens = word_tokenize(text.lower())
-    stop_words = set(stopwords.words('english'))
-    tokens = [word for word in tokens if word.isalnum() and word not in stop_words]
+    doc = nlp(text.lower())
+    tokens = [token.text for token in doc if token.is_alpha and not token.is_stop]
     cleaned_text = ' '.join(tokens)
     return cleaned_text
 
@@ -54,28 +56,12 @@ def class_det(Details, vectorizer, classifier, return_proba=False):
 
 # Function to calculate class probability and confidence
 def class_prob_conf(query):
-    predictions_proba = class_det(query, loaded_vectorizer, naive_bayes_classifier, return_proba=True)
+    cleaned_query = clean_text(query)
+    predictions_proba = class_det(cleaned_query, loaded_vectorizer, naive_bayes_classifier, return_proba=True)
     top_class_idx = predictions_proba.argmax()
     top_class_prob = predictions_proba.max()
     top_class = naive_bayes_classifier.classes_[top_class_idx]
     return top_class, top_class_prob
-
-# def visualize_data(Details):
-#     img_dir = os.path.expanduser('~/visualization_images')
-#     os.makedirs(img_dir, exist_ok=True)
-
-#     wordcloud = WordCloud(width=800, height=400, background_color='white').generate(Details)
-#     plt.figure(figsize=(10, 5))
-#     plt.imshow(wordcloud, interpolation='bilinear')
-#     plt.axis('off')
-#     plt.title('Word Cloud for Most Frequent Words')
-#     plt.savefig(os.path.join(img_dir, 'word_cloud.png'))
-
-#     word_cloud_img_path = os.path.join(img_dir, 'word_cloud.png')
-#     return word_cloud_img_path
-
-# Function to predict and display results for a single query
-
 
 #######
 #####
@@ -86,40 +72,67 @@ def class_prob_conf(query):
 ####
 #####
 ######
-def predict(query, loaded_vectorizer, naive_bayes_classifier):
+def predict(query, loaded_vectorizer, naive_bayes_classifier, df):
     try:
-        word_count = len(query.split())
-
-        top_class, top_class_prob = class_prob_conf(query)
-
-
         cleaned_text = clean_text(query)
+        print("Cleaned Text:", cleaned_text)
+        print("Tokenized Query:", [token.text for token in nlp(cleaned_text)])
+
+        feature_names = loaded_vectorizer.get_feature_names_out()
+        print("Feature Names:", feature_names)
+
+        # Use the class_det function to get predictions from the Naive Bayes classifier
+        predictions_proba = class_det(cleaned_text, loaded_vectorizer, naive_bayes_classifier, return_proba=True)
+
+        # Get the predicted class and its probability
+        top_class_idx = predictions_proba.argmax()
+        top_class_prob = predictions_proba.max()
+        top_class = naive_bayes_classifier.classes_[top_class_idx]
+
+        # Get the rows from the DataFrame associated with the predicted class
+        predicted_class_rows = df[df['Class'] == top_class][['Place', 'Details', 'Class']]
+
+        # Calculate TF-IDF vectors for places
+        place_tfidf_matrix = loaded_vectorizer.transform(predicted_class_rows['Details'])
+        # Calculate cosine similarity between query and places
+        query_tfidf_vector = loaded_vectorizer.transform([cleaned_text])
+        print("Query TF-IDF Vector:", query_tfidf_vector)
+
+        similarity_scores = cosine_similarity(query_tfidf_vector, place_tfidf_matrix).flatten()
 
 
-        final_words = word_tokenize(cleaned_text)
-        counts = Counter(final_words)
+        # Filter places based on a similarity threshold (you can adjust this threshold)
+        similarity_threshold = 0.2
+        matched_rows = predicted_class_rows[similarity_scores >= similarity_threshold]
 
-        # df = pd.DataFrame(counts.most_common(10), columns=['Words', 'Counts'])
-        # bar_plot = gr.BarPlot(df, x="Words", y="Counts", width=500, title="Top 10 Most Common Words")       
+        if matched_rows.empty:
+            return "No places found for the given query and predicted class.", "N/A", "N/A"
+
+        matched_rows = matched_rows.copy()  # create a copy to avoid the SettingWithCopyWarning
+        matched_rows.loc[:, 'Similarity'] = similarity_scores[similarity_scores >= similarity_threshold]
+
+
+
+        # Sort by similarity in descending order
+        matched_rows = matched_rows.sort_values(by='Similarity', ascending=False)
+
+        for index, row in matched_rows.iterrows():
+            print(f"\nPlace: {row['Place']}\nDetails: {row['Details']}\nClass: {row['Class']}\nSimilarity: {row['Similarity']:.4f}\n{'-'*50}")
+
+        # Format the list of places for the interface output with indices
+        places_list = [f"{i+1} - {place}" for i, place in enumerate(matched_rows['Place'])]
+        places_text = "\n".join(places_list)
 
         # Display the top predicted class and its confidence score
         result_text_class = f"{top_class}"
         result_top_class = f"{top_class_prob:.2%}"
 
-        # wordcloud_img_path = visualize_data(cleaned_text)
-
-        # word_cloud = gr.Image(wordcloud_img_path, label="Word Cloud")
-
-        return (
-            word_count,
-            result_text_class, 
-            result_top_class
-        )
+        return places_text, result_text_class, result_top_class
 
     except Exception as e:
         print("Error in predict function:", e)
         raise e
-
+    
 ##
 # Relative path to image files
 MostWords_Path_Aero = "Data Cleaning/most_common_words_class_Aerospace.png"
@@ -144,11 +157,12 @@ with gr.Blocks() as single_query:
             with gr.Row():
                 run_btn = gr.Button("Run", size="lg")
     with gr.Row():
-        with gr.Column():
-            word_count = gr.Textbox(label="Word Count")
-        with gr.Column():
+        with gr.Column(scale=4):
+            predicted_class_places_label = gr.Textbox(label='Places Related to Query')
+
+            
+        with gr.Column(scale=1):
             predictclass = gr.Textbox(label='Category of Places')
-        with gr.Column():
             result_prob = gr.Textbox(label='Probability')
     with gr.Row():
         with gr.Accordion("Click HERE to see list of words to be use for each category",open=False):
@@ -165,7 +179,7 @@ with gr.Blocks() as single_query:
 
 
 
-    run_btn.click(lambda query: predict(query, loaded_vectorizer, naive_bayes_classifier), inputs=inp, outputs=[word_count,predictclass,result_prob])
+    run_btn.click(lambda query: predict(query, loaded_vectorizer, naive_bayes_classifier,df), inputs=inp, outputs=[predicted_class_places_label,predictclass,result_prob])
 
 #############################################################################################################################################################################
     #############################################################################################################################################################################
