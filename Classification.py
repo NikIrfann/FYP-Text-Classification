@@ -215,6 +215,7 @@ def get_word_count(text):
 def download_df(file: pd.DataFrame):
     download_path = os.path.join("predicted.csv")
     file.to_csv(download_path)
+    gr.Info()
     print(f"Predictions Downloaded to: {download_path}")
 
 # Function to calculate accuracy
